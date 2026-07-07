@@ -96,7 +96,6 @@ const SHEET_ID = "1RL7WpDKXXkp0sSwzw-bJX8XZUFmnlsH811mM4294QMg";
 const SHEET_GID = "0";
 const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}`;
-document.getElementById("sheet-link").href = SHEET_VIEW_URL;
 
 const LS_SHEET = "famima_sheet_v2";   // 最後に取得できたシートのキャッシュ
 const LS_GEO = "famima_geo_v2";       // 実行時に補完したジオコーディング結果
@@ -192,8 +191,6 @@ async function initData(forceReload) {
   buildPrefSelect();
   render();
 }
-
-document.getElementById("btn-reload").addEventListener("click", () => initData(true));
 
 function buildPrefSelect() {
   const counts = {};
@@ -418,24 +415,6 @@ document.getElementById("btn-origin").addEventListener("click", () => {
 });
 document.getElementById("origin-input").addEventListener("keydown", e => {
   if (e.key === "Enter") document.getElementById("btn-origin").click();
-});
-document.getElementById("btn-geoloc").addEventListener("click", () => {
-  setOriginAndSort(() => new Promise(resolve => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      async pos => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        let title = "";
-        try {
-          const sts = await heartrailsNearest(lat, lng);
-          if (sts && sts.length) title = sts[0].prefecture || "";
-        } catch (e) {}
-        resolve({ lat, lng, label: "現在地", title });
-      },
-      () => resolve(null),
-      { enableHighAccuracy: false, timeout: 10000 }
-    );
-  }));
 });
 
 /* ===== CSVエクスポート ===== */
