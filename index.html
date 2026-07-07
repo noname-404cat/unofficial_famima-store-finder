@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ファミマ キャンペーン店舗ファインダー</title>
+<title>ファミマ キャンペーン店舗ファインダー（非公式）</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root {
@@ -39,9 +39,6 @@
   td.station { font-size: .85rem; color: #345; }
   a.gmap { color: var(--fm-blue); text-decoration: none; white-space: nowrap; }
   a.gmap:hover { text-decoration: underline; }
-  .st { cursor: pointer; user-select: none; white-space: nowrap; padding: 3px 8px; border-radius: 12px; font-size: .8rem; border: 1px solid var(--border); background: #f2f2f2; }
-  .st[data-v="1"] { background: #ffe3e3; color: #b02020; border-color: #f3c0c0; }
-  .st[data-v="2"] { background: #dcf5e4; color: #0a7a34; border-color: #b5e6c6; }
   .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .78rem; background: #eef4f0; color: #345; margin-left: 6px; }
   .footnote { font-size: .78rem; color: var(--muted); margin: 10px 0 30px; }
   @media (max-width: 640px) {
@@ -51,8 +48,9 @@
 </head>
 <body>
 <header>
-  <h1>🏪 ファミマ キャンペーン店舗ファインダー</h1>
+  <h1>🏪 ファミマ キャンペーン店舗ファインダー <small style="font-size:.7em; font-weight:normal;">（非公式）</small></h1>
   <div class="sub" id="data-label">店舗データ読み込み中…</div>
+  <div class="sub">ファンが個人的に作成した非公式ツールです。ファミリーマートおよび関係企業とは一切関係ありません。</div>
 </header>
 <main>
   <div class="panel">
@@ -79,15 +77,15 @@
       </div>
     </div>
     <table id="store-table">
-      <thead><tr><th>チェック</th><th>店名</th><th>住所</th><th class="station">最寄り駅（候補）</th><th>距離</th><th>地図</th></tr></thead>
+      <thead><tr><th>店名</th><th>住所</th><th class="station">最寄り駅（候補）</th><th>距離</th><th>地図</th></tr></thead>
       <tbody id="store-tbody"></tbody>
     </table>
   </div>
 
   <p class="footnote">
+    本ページはファンが個人的に作成した<b>非公式</b>ツールです。ファミリーマートおよび関係企業・キャンペーン主催者とは一切関係ありません。正確な情報は公式のご案内をご確認ください。<br>
     店舗一覧は<a id="sheet-link" href="#" target="_blank" rel="noopener">Googleスプレッドシート</a>から読み込んでいます（シートを更新すれば「最新データ再取得」で反映されます）。
-    最寄り駅・距離・地図は目安です（住所の座標変換: 国土地理院API / 駅データ: ekidata由来のオープンデータ・HeartRails Express API / 地図タイル: 地理院地図）。
-    在庫の有無は分からないため、チェック機能（クリックで 未確認→❌なし→✅ゲット）を巡回の記録にどうぞ。チェックはこのブラウザにのみ保存されます。
+    最寄り駅・距離・地図は目安です。在庫状況は表示できません（住所の座標変換: 国土地理院API / 駅データ: ekidata由来のオープンデータ・HeartRails Express API / 地図タイル: 地理院地図）。
   </p>
 </main>
 
@@ -104,21 +102,18 @@ const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?
 document.getElementById("sheet-link").href = SHEET_VIEW_URL;
 
 const LS_SHEET = "famima_sheet_v2";   // 最後に取得できたシートのキャッシュ
-const LS_STATUS = "famima_status_v1"; // 店舗ごとのチェック状態
 const LS_GEO = "famima_geo_v2";       // 実行時に補完したジオコーディング結果
 const PREFS = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
 
 let DATA = null;          // {label, stores:[{name,pref,postal,addr}]}
 let origin = null;        // {lat,lng,label}
 let runtimeGeo = {};      // addr -> [lat,lng,駅表記] 実行時補完分
-let statusMap = {};       // storeKey -> 0/1/2
 let map = null, markerLayer = null, originMarker = null;
 
 function loadJSON(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
 }
 function saveJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
-function storeKey(s) { return s.name + "|" + s.postal; }
 function geoOf(s) { return runtimeGeo[s.addr] || (window.FAMIMA_GEO && window.FAMIMA_GEO[s.addr]) || null; }
 function esc(t) { const d = document.createElement("span"); d.textContent = t ?? ""; return d.innerHTML; }
 
@@ -196,7 +191,6 @@ async function initData(forceReload) {
     else { label.textContent = "店舗データを取得できませんでした。通信環境を確認して再読み込みしてください。"; return; }
   }
   runtimeGeo = loadJSON(LS_GEO, {});
-  statusMap = loadJSON(LS_STATUS, {});
   label.textContent = `対象 ${DATA.stores.length}店舗 — ${DATA.label}【${src}】`;
   buildPrefSelect();
   render();
@@ -242,8 +236,6 @@ function gmapUrl(s) {
   return `https://www.google.com/maps/search/?api=1&query=${q}`;
 }
 
-const ST_LABEL = ["未確認", "❌なし", "✅ゲット"];
-
 function render() {
   const tbody = document.getElementById("store-tbody");
   tbody.innerHTML = "";
@@ -257,10 +249,7 @@ function render() {
   const frag = document.createDocumentFragment();
   for (const { s, g, d } of list) {
     const tr = document.createElement("tr");
-    const key = storeKey(s);
-    const v = statusMap[key] || 0;
     tr.innerHTML =
-      `<td><span class="st" data-v="${v}" data-key="${esc(key)}">${ST_LABEL[v]}</span></td>` +
       `<td>${esc(s.name)}</td>` +
       `<td>${esc(s.addr)}</td>` +
       `<td class="station">${g && g[2] ? esc(g[2]) : "—"}</td>` +
@@ -271,23 +260,12 @@ function render() {
   tbody.appendChild(frag);
 
   const total = list.length;
-  const got = list.filter(x => statusMap[storeKey(x.s)] === 2).length;
-  const none = list.filter(x => statusMap[storeKey(x.s)] === 1).length;
   document.getElementById("count-line").innerHTML =
     `表示 <b>${total}</b> 店舗` +
-    `<span class="pill">✅ゲット ${got}</span><span class="pill">❌なし ${none}</span><span class="pill">未確認 ${total - got - none}</span>` +
     (origin ? `<span class="pill">基準: ${esc(origin.label)}</span>` : "");
   renderMap(list);
 }
 
-document.getElementById("store-tbody").addEventListener("click", e => {
-  const el = e.target.closest(".st");
-  if (!el) return;
-  const key = el.dataset.key;
-  statusMap[key] = ((statusMap[key] || 0) + 1) % 3;
-  saveJSON(LS_STATUS, statusMap);
-  render();
-});
 document.getElementById("pref-select").addEventListener("change", render);
 document.getElementById("kw-input").addEventListener("input", render);
 
@@ -305,12 +283,10 @@ function renderMap(list) {
     markerLayer = L.layerGroup().addTo(map);
   }
   markerLayer.clearLayers();
-  const COLORS = ["#888", "#c0392b", "#00a040"];
   const bounds = [];
   for (const { s, g, d } of pts) {
-    const v = statusMap[storeKey(s)] || 0;
     const ll = [g[0], g[1]];
-    const m = L.circleMarker(ll, { radius: 7, color: COLORS[v], fillColor: COLORS[v], fillOpacity: .8 });
+    const m = L.circleMarker(ll, { radius: 7, color: "#00a040", fillColor: "#00a040", fillOpacity: .8 });
     m.bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.addr)}<br>` +
       (g[2] ? `🚉 ${esc(g[2])}<br>` : "") +
       (d != null ? `基準から約${d.toFixed(1)}km ` : "") +
@@ -467,11 +443,11 @@ document.getElementById("btn-geoloc").addEventListener("click", () => {
 
 /* ===== CSVエクスポート ===== */
 document.getElementById("btn-csv").addEventListener("click", () => {
-  const rows = [["ステータス", "店名", "郵便番号", "住所", "最寄り駅候補", "距離km", "Googleマップ"]];
+  const rows = [["店名", "郵便番号", "住所", "最寄り駅候補", "距離km", "Googleマップ"]];
   filteredStores().forEach(s => {
     const g = geoOf(s);
     const d = (origin && g) ? distKm([origin.lat, origin.lng], [g[0], g[1]]).toFixed(1) : "";
-    rows.push([ST_LABEL[statusMap[storeKey(s)] || 0], s.name, s.postal, s.addr, g && g[2] ? g[2] : "", d, gmapUrl(s)]);
+    rows.push([s.name, s.postal, s.addr, g && g[2] ? g[2] : "", d, gmapUrl(s)]);
   });
   const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = document.createElement("a");
