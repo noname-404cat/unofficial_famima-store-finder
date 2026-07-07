@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ファミマ キャンペーン店舗ファインダー</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --fm-green: #00a040;
+    --fm-blue: #0068b7;
+    --bg: #f4f6f5;
+    --card: #ffffff;
+    --text: #222;
+    --muted: #777;
+    --border: #dde3e0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; background: var(--bg); color: var(--text); }
+  header { background: linear-gradient(90deg, var(--fm-green), var(--fm-blue)); color: #fff; padding: 14px 20px; }
+  header h1 { margin: 0; font-size: 1.25rem; }
+  header .sub { font-size: .8rem; opacity: .9; margin-top: 4px; }
+  main { max-width: 1120px; margin: 0 auto; padding: 16px; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .controls label { font-size: .85rem; color: var(--muted); }
+  select, input[type=text] { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: .95rem; }
+  input[type=text] { min-width: 200px; }
+  button { padding: 8px 14px; border: none; border-radius: 6px; background: var(--fm-blue); color: #fff; font-size: .9rem; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  button.ghost { background: #eee; color: #333; }
+  button:disabled { background: #bbb; cursor: wait; }
+  #status-line { font-size: .85rem; color: var(--muted); margin-top: 8px; min-height: 1.2em; }
+  #map { height: 380px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 14px; display: none; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: #fafbfa; font-size: .8rem; color: var(--muted); position: sticky; top: 0; }
+  td.dist { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.station { font-size: .85rem; color: #345; }
+  a.gmap { color: var(--fm-blue); text-decoration: none; white-space: nowrap; }
+  a.gmap:hover { text-decoration: underline; }
+  .st { cursor: pointer; user-select: none; white-space: nowrap; padding: 3px 8px; border-radius: 12px; font-size: .8rem; border: 1px solid var(--border); background: #f2f2f2; }
+  .st[data-v="1"] { background: #ffe3e3; color: #b02020; border-color: #f3c0c0; }
+  .st[data-v="2"] { background: #dcf5e4; color: #0a7a34; border-color: #b5e6c6; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .78rem; background: #eef4f0; color: #345; margin-left: 6px; }
+  .footnote { font-size: .78rem; color: var(--muted); margin: 10px 0 30px; }
+  @media (max-width: 640px) {
+    td.station, th.station { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏪 ファミマ キャンペーン店舗ファインダー</h1>
+  <div class="sub" id="data-label">店舗データ読み込み中…</div>
+</header>
+<main>
+  <div class="panel">
+    <div class="controls">
+      <label>都道府県
+        <select id="pref-select"><option value="">選択してください</option></select>
+      </label>
+      <input type="text" id="origin-input" placeholder="駅名・住所（例: 渋谷駅）">
+      <button id="btn-origin">距離順に表示</button>
+      <button id="btn-geoloc" class="ghost">📍 現在地から</button>
+      <input type="text" id="kw-input" placeholder="キーワード絞り込み（市区町村・店名）">
+    </div>
+    <div id="status-line"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="panel" id="list-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <div id="count-line" style="font-size:.9rem;"></div>
+      <div>
+        <button id="btn-reload" class="ghost">🔄 最新データ再取得</button>
+        <button id="btn-csv" class="ghost">CSVエクスポート</button>
+      </div>
+    </div>
+    <table id="store-table">
+      <thead><tr><th>チェック</th><th>店名</th><th>住所</th><th class="station">最寄り駅（候補）</th><th>距離</th><th>地図</th></tr></thead>
+      <tbody id="store-tbody"></tbody>
+    </table>
+  </div>
+
+  <p class="footnote">
+    店舗一覧は<a id="sheet-link" href="#" target="_blank" rel="noopener">Googleスプレッドシート</a>から読み込んでいます（シートを更新すれば「最新データ再取得」で反映されます）。
+    最寄り駅・距離・地図は目安です（住所の座標変換: 国土地理院API / 駅データ: ekidata由来のオープンデータ・HeartRails Express API / 地図タイル: 地理院地図）。
+    在庫の有無は分からないため、チェック機能（クリックで 未確認→❌なし→✅ゲット）を巡回の記録にどうぞ。チェックはこのブラウザにのみ保存されます。
+  </p>
+</main>
+
+<script src="stores.js"></script>
+<script src="geo.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* ===== 設定 ===== */
+const SHEET_ID = "1RL7WpDKXXkp0sSwzw-bJX8XZUFmnlsH811mM4294QMg";
+const SHEET_GID = "0";
+const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
+const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}`;
+document.getElementById("sheet-link").href = SHEET_VIEW_URL;
+
+const LS_SHEET = "famima_sheet_v2";   // 最後に取得できたシートのキャッシュ
+const LS_STATUS = "famima_status_v1"; // 店舗ごとのチェック状態
+const LS_GEO = "famima_geo_v2";       // 実行時に補完したジオコーディング結果
+const PREFS = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
+
+let DATA = null;          // {label, stores:[{name,pref,postal,addr}]}
+let origin = null;        // {lat,lng,label}
+let runtimeGeo = {};      // addr -> [lat,lng,駅表記] 実行時補完分
+let statusMap = {};       // storeKey -> 0/1/2
+let map = null, markerLayer = null, originMarker = null;
+
+function loadJSON(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
+}
+function saveJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
+function storeKey(s) { return s.name + "|" + s.postal; }
+function geoOf(s) { return runtimeGeo[s.addr] || (window.FAMIMA_GEO && window.FAMIMA_GEO[s.addr]) || null; }
+function esc(t) { const d = document.createElement("span"); d.textContent = t ?? ""; return d.innerHTML; }
+
+/* ===== シート読み込み ===== */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i+1] === '"') { cell += '"'; i++; } else inQ = false; }
+      else cell += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i+1] === "\n") i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+function rowsToStores(rows) {
+  // タイトル行から「◯◯（7月7日現在)」のラベルを拾う
+  let label = "";
+  for (const r of rows.slice(0, 5)) {
+    if (r[0] && !r[0].startsWith("※") && r[0] !== "店名") { label = r[0] + (r[1] ? `（${r[1]}）` : ""); break; }
+  }
+  // ヘッダ行を探して列位置を決める（店名/都道府県/郵便番号/住所）
+  let cols = null;
+  for (const r of rows) {
+    const iName = r.indexOf("店名"), iPref = r.indexOf("都道府県"), iPostal = r.indexOf("郵便番号"), iAddr = r.indexOf("住所");
+    if (iName >= 0 && iPref >= 0 && iAddr >= 0) { cols = { iName, iPref, iPostal, iAddr }; break; }
+  }
+  if (!cols) throw new Error("ヘッダ行（店名/都道府県/住所）が見つかりません");
+  const seen = new Set();
+  const stores = [];
+  for (const r of rows) {
+    const name = (r[cols.iName] || "").trim();
+    const pref = (r[cols.iPref] || "").trim();
+    const postal = (r[cols.iPostal] || "").trim();
+    const addr = (r[cols.iAddr] || "").trim();
+    if (!name || !addr || !PREFS.includes(pref)) continue;
+    if (!/^\d{3}-\d{4}$/.test(postal)) continue;
+    const k = name + "|" + postal + "|" + addr;
+    if (seen.has(k)) continue; // シート内の重複ページ対策
+    seen.add(k);
+    stores.push({ name, pref, postal, addr });
+  }
+  return { label, stores };
+}
+
+async function fetchSheet() {
+  const r = await fetch(SHEET_CSV_URL, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const parsed = rowsToStores(parseCsv(await r.text()));
+  if (parsed.stores.length < 10) throw new Error("店舗行がほとんどありません");
+  parsed.fetchedAt = new Date().toLocaleString("ja-JP");
+  return parsed;
+}
+
+async function initData(forceReload) {
+  const label = document.getElementById("data-label");
+  label.textContent = "店舗データ読み込み中…";
+  let src = "";
+  try {
+    DATA = await fetchSheet();
+    saveJSON(LS_SHEET, DATA);
+    src = "シート最新";
+  } catch (e) {
+    const cached = loadJSON(LS_SHEET, null);
+    if (cached && cached.stores) { DATA = cached; src = `オフライン: ${cached.fetchedAt}時点のキャッシュ`; }
+    else if (window.FAMIMA_DATA) { DATA = window.FAMIMA_DATA; src = "同梱スナップショット"; }
+    else { label.textContent = "店舗データを取得できませんでした。通信環境を確認して再読み込みしてください。"; return; }
+  }
+  runtimeGeo = loadJSON(LS_GEO, {});
+  statusMap = loadJSON(LS_STATUS, {});
+  label.textContent = `対象 ${DATA.stores.length}店舗 — ${DATA.label}【${src}】`;
+  buildPrefSelect();
+  render();
+}
+
+document.getElementById("btn-reload").addEventListener("click", () => initData(true));
+
+function buildPrefSelect() {
+  const counts = {};
+  DATA.stores.forEach(s => counts[s.pref] = (counts[s.pref] || 0) + 1);
+  const sel = document.getElementById("pref-select");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">選択してください</option>';
+  PREFS.forEach(p => {
+    if (!counts[p]) return;
+    const o = document.createElement("option");
+    o.value = p; o.textContent = `${p}（${counts[p]}）`;
+    sel.appendChild(o);
+  });
+  sel.value = cur;
+}
+
+/* ===== フィルタと描画 ===== */
+function filteredStores() {
+  if (!DATA) return [];
+  const pref = document.getElementById("pref-select").value;
+  const kw = document.getElementById("kw-input").value.trim();
+  let list = DATA.stores;
+  if (pref) list = list.filter(s => s.pref === pref);
+  if (kw) list = list.filter(s => (s.name + s.addr + s.postal).includes(kw));
+  return list;
+}
+
+function distKm(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * rad, dLng = (b[1] - a[1]) * rad;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a[0]*rad) * Math.cos(b[0]*rad) * Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function gmapUrl(s) {
+  const q = encodeURIComponent(`ファミリーマート ${s.name} ${s.addr.split("　")[0]}`);
+  return `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
+const ST_LABEL = ["未確認", "❌なし", "✅ゲット"];
+
+function render() {
+  const tbody = document.getElementById("store-tbody");
+  tbody.innerHTML = "";
+  let list = filteredStores().map(s => {
+    const g = geoOf(s);
+    const d = (origin && g) ? distKm([origin.lat, origin.lng], [g[0], g[1]]) : null;
+    return { s, g, d };
+  });
+  if (origin) list.sort((x, y) => (x.d ?? 1e9) - (y.d ?? 1e9));
+
+  const frag = document.createDocumentFragment();
+  for (const { s, g, d } of list) {
+    const tr = document.createElement("tr");
+    const key = storeKey(s);
+    const v = statusMap[key] || 0;
+    tr.innerHTML =
+      `<td><span class="st" data-v="${v}" data-key="${esc(key)}">${ST_LABEL[v]}</span></td>` +
+      `<td>${esc(s.name)}</td>` +
+      `<td>${esc(s.addr)}</td>` +
+      `<td class="station">${g && g[2] ? esc(g[2]) : "—"}</td>` +
+      `<td class="dist">${d != null ? d.toFixed(1) + " km" : "—"}</td>` +
+      `<td><a class="gmap" target="_blank" rel="noopener" href="${gmapUrl(s)}">🗺 開く</a></td>`;
+    frag.appendChild(tr);
+  }
+  tbody.appendChild(frag);
+
+  const total = list.length;
+  const got = list.filter(x => statusMap[storeKey(x.s)] === 2).length;
+  const none = list.filter(x => statusMap[storeKey(x.s)] === 1).length;
+  document.getElementById("count-line").innerHTML =
+    `表示 <b>${total}</b> 店舗` +
+    `<span class="pill">✅ゲット ${got}</span><span class="pill">❌なし ${none}</span><span class="pill">未確認 ${total - got - none}</span>` +
+    (origin ? `<span class="pill">基準: ${esc(origin.label)}</span>` : "");
+  renderMap(list);
+}
+
+document.getElementById("store-tbody").addEventListener("click", e => {
+  const el = e.target.closest(".st");
+  if (!el) return;
+  const key = el.dataset.key;
+  statusMap[key] = ((statusMap[key] || 0) + 1) % 3;
+  saveJSON(LS_STATUS, statusMap);
+  render();
+});
+document.getElementById("pref-select").addEventListener("change", render);
+document.getElementById("kw-input").addEventListener("input", render);
+
+/* ===== 地図 ===== */
+function renderMap(list) {
+  const el = document.getElementById("map");
+  const pts = list.filter(x => x.g);
+  if (!window.L || (!pts.length && !origin)) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  if (!map) {
+    map = L.map("map");
+    L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+      attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>', maxZoom: 18
+    }).addTo(map);
+    markerLayer = L.layerGroup().addTo(map);
+  }
+  markerLayer.clearLayers();
+  const COLORS = ["#888", "#c0392b", "#00a040"];
+  const bounds = [];
+  for (const { s, g, d } of pts) {
+    const v = statusMap[storeKey(s)] || 0;
+    const ll = [g[0], g[1]];
+    const m = L.circleMarker(ll, { radius: 7, color: COLORS[v], fillColor: COLORS[v], fillOpacity: .8 });
+    m.bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.addr)}<br>` +
+      (g[2] ? `🚉 ${esc(g[2])}<br>` : "") +
+      (d != null ? `基準から約${d.toFixed(1)}km ` : "") +
+      `<a target="_blank" rel="noopener" href="${gmapUrl(s)}">Googleマップで開く</a>`);
+    markerLayer.addLayer(m);
+    bounds.push(ll);
+  }
+  if (originMarker) { map.removeLayer(originMarker); originMarker = null; }
+  if (origin) {
+    originMarker = L.marker([origin.lat, origin.lng]).addTo(map).bindPopup(esc(origin.label));
+    bounds.push([origin.lat, origin.lng]);
+  }
+  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
+/* ===== ジオコーディング（実行時補完・通常は事前計算済み） ===== */
+function normDigits(t) {
+  return t.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+          .replace(/[－―‐−]/g, "-");
+}
+
+async function gsiSearch(q) {
+  const r = await fetch("https://msearch.gsi.go.jp/address-search/AddressSearch?q=" + encodeURIComponent(q));
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (!j || !j.length) return null;
+  const c = j[0].geometry.coordinates;
+  return { lat: c[1], lng: c[0], title: (j[0].properties && j[0].properties.title) || q };
+}
+async function nominatimSearch(q) {
+  const r = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=jp&limit=1&q=" + encodeURIComponent(q));
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (!j || !j.length) return null;
+  return { lat: +j[0].lat, lng: +j[0].lon, title: j[0].display_name };
+}
+async function heartrailsStation(name) {
+  const r = await fetch("https://express.heartrails.com/api/json?method=getStations&name=" + encodeURIComponent(name));
+  if (!r.ok) return null;
+  const j = await r.json();
+  return (j.response && j.response.station) || null;
+}
+async function heartrailsNearest(lat, lng) {
+  const r = await fetch(`https://express.heartrails.com/api/json?method=getStations&x=${lng}&y=${lat}`);
+  if (!r.ok) return null;
+  const j = await r.json();
+  return (j.response && j.response.station) || null;
+}
+
+async function geocodeStore(s) {
+  if (geoOf(s)) return geoOf(s);
+  const base = normDigits(s.addr);
+  let hit = null;
+  try {
+    hit = await gsiSearch(base);
+    if (!hit && base.includes("　")) hit = await gsiSearch(base.split("　")[0]);
+  } catch (e) {}
+  if (!hit) { runtimeGeo[s.addr] = null; return null; }
+  let stText = "";
+  try {
+    const sts = await heartrailsNearest(hit.lat, hit.lng);
+    if (sts && sts.length) {
+      stText = sts.slice(0, 2).map(t => `${t.name}駅(${t.line}) ${t.distance ? "約" + t.distance : ""}`.trim()).join("／");
+    }
+  } catch (e) {}
+  runtimeGeo[s.addr] = [hit.lat, hit.lng, stText];
+  return runtimeGeo[s.addr];
+}
+
+async function geocodeAll(list, statusEl) {
+  const todo = list.filter(s => !geoOf(s) && !(s.addr in runtimeGeo));
+  if (!todo.length) return;
+  let done = 0;
+  const workers = Array.from({ length: 5 }, async () => {
+    while (todo.length) {
+      const s = todo.shift();
+      await geocodeStore(s);
+      done++;
+      statusEl.textContent = `新しい店舗の位置情報を取得中… ${done}件完了`;
+    }
+  });
+  await Promise.all(workers);
+  saveJSON(LS_GEO, runtimeGeo);
+}
+
+/* ===== 基準地点（駅名・住所・現在地） ===== */
+async function setOriginAndSort(getOrigin) {
+  const statusEl = document.getElementById("status-line");
+  const btn = document.getElementById("btn-origin");
+  btn.disabled = true;
+  try {
+    statusEl.textContent = "基準地点を検索中…";
+    const o = await getOrigin();
+    if (!o) { statusEl.textContent = "場所が見つかりませんでした。駅名や住所を変えて試してください。"; return; }
+    origin = o;
+    const sel = document.getElementById("pref-select");
+    if (!sel.value) {
+      const p = PREFS.find(p => (o.title || "").includes(p));
+      if (p) sel.value = p;
+      else { statusEl.textContent = "都道府県を選択してから再度押してください。"; return; }
+    }
+    const list = filteredStores();
+    await geocodeAll(list, statusEl);
+    const failed = list.filter(s => !geoOf(s)).length;
+    statusEl.textContent = `「${origin.label}」から近い順に表示しています。` + (failed ? `（${failed}件は位置を特定できず末尾に表示）` : "");
+    render();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("btn-origin").addEventListener("click", () => {
+  const q = document.getElementById("origin-input").value.trim();
+  if (!q) { document.getElementById("status-line").textContent = "駅名または住所を入力してください。"; return; }
+  setOriginAndSort(async () => {
+    const selPref = document.getElementById("pref-select").value;
+    // 1) 駅名として検索（HeartRails）— 同名駅は選択中の都道府県を優先
+    try {
+      const sts = await heartrailsStation(q.replace(/駅$/, ""));
+      if (sts && sts.length) {
+        const st = (selPref && sts.find(t => t.prefecture === selPref)) || sts[0];
+        return { lat: +st.y, lng: +st.x, label: `${st.name}駅（${st.line}）`, title: st.prefecture };
+      }
+    } catch (e) {}
+    // 2) 住所・地名として検索（GSI → Nominatim）
+    let hit = null;
+    try { hit = await gsiSearch(normDigits(q)); } catch (e) {}
+    if (!hit) { try { hit = await nominatimSearch(q); } catch (e) {} }
+    return hit ? { lat: hit.lat, lng: hit.lng, label: q, title: hit.title } : null;
+  });
+});
+document.getElementById("origin-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("btn-origin").click();
+});
+document.getElementById("btn-geoloc").addEventListener("click", () => {
+  setOriginAndSort(() => new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        let title = "";
+        try {
+          const sts = await heartrailsNearest(lat, lng);
+          if (sts && sts.length) title = sts[0].prefecture || "";
+        } catch (e) {}
+        resolve({ lat, lng, label: "現在地", title });
+      },
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 10000 }
+    );
+  }));
+});
+
+/* ===== CSVエクスポート ===== */
+document.getElementById("btn-csv").addEventListener("click", () => {
+  const rows = [["ステータス", "店名", "郵便番号", "住所", "最寄り駅候補", "距離km", "Googleマップ"]];
+  filteredStores().forEach(s => {
+    const g = geoOf(s);
+    const d = (origin && g) ? distKm([origin.lat, origin.lng], [g[0], g[1]]).toFixed(1) : "";
+    rows.push([ST_LABEL[statusMap[storeKey(s)] || 0], s.name, s.postal, s.addr, g && g[2] ? g[2] : "", d, gmapUrl(s)]);
+  });
+  const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "famima_stores.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+initData(false);
+</script>
+</body>
+</html>
